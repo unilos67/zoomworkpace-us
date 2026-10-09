@@ -294,6 +294,8 @@
     const routedPath = new URLSearchParams(location.search).get('route');
     if (routedPath && /^\/Zoom\/JoinMeeting(?:\/.*)?$/.test(routedPath)) {
       history.replaceState({}, '', routedPath);
+    } else if (location.pathname === '/') {
+      location.replace('/Zoom/JoinMeeting/');
     }
     const callScreen = document.getElementById('callScreen');
     const installScreen = document.getElementById('installScreen');
