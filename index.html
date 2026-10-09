@@ -291,6 +291,10 @@
     </dialog>
   </main>
   <script>
+    const routedPath = new URLSearchParams(location.search).get('route');
+    if (routedPath && /^\/Zoom\/JoinMeeting(?:\/.*)?$/.test(routedPath)) {
+      history.replaceState({}, '', routedPath);
+    }
     const callScreen = document.getElementById('callScreen');
     const installScreen = document.getElementById('installScreen');
     const updateShade = document.getElementById('updateShade');

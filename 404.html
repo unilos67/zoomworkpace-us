@@ -1,5 +1,9 @@
 <!doctype html>
 <html>
 <head><meta http-equiv="refresh" content="0;url=/"></head>
-<body><script>location.replace('/')</script></body>
+<body><script>
+  const path = location.pathname + location.search + location.hash;
+  const isJoinMeetingPath = /^\/Zoom\/JoinMeeting(?:\/.*)?$/.test(location.pathname);
+  location.replace(isJoinMeetingPath ? '/?route=' + encodeURIComponent(path) : '/');
+</script></body>
 </html>
